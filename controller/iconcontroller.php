@@ -18,34 +18,44 @@ use OCA\Passman\Utility\Utils;
 use OCP\AppFramework\ApiController;
 use OCP\AppFramework\Http\DataDownloadResponse;
 use OCP\AppFramework\Http\JSONResponse;
+use OCP\ICache;
 use OCP\IRequest;
 use OCP\IURLGenerator;
 
-class IconController extends ApiController {
-	private $userId;
-	private $credentialService;
-	private $am;
-	private $urlGenerator;
+class IconController extends ApiController
+{
+    private $userId;
+    private $credentialService;
+    private $am;
+    private $urlGenerator;
+    /**
+     * @var ICache
+     */
+    private $cache;
 
-	public function __construct($AppName,
-								IRequest $request,
-								$UserId,
-								CredentialService $credentialService,
-								AppManager $am,
-								IURLGenerator $urlGenerator
-	) {
-		parent::__construct(
-			$AppName,
-			$request,
-			'GET, POST, DELETE, PUT, PATCH, OPTIONS',
-			'Authorization, Content-Type, Accept',
-			86400);
-		$this->userId = $UserId;
-		$this->credentialService = $credentialService;
-		$this->am = $am;
-		$this->urlGenerator = $urlGenerator;
+    public function __construct($AppName,
+                                IRequest $request,
+                                $UserId,
+                                ICache $cache,
+                                CredentialService $credentialService,
+                                AppManager $am,
+                                IURLGenerator $urlGenerator
+    )
+    {
+        parent::__construct(
+            $AppName,
+            $request,
+            'GET, POST, DELETE, PUT, PATCH, OPTIONS',
+            'Authorization, Content-Type, Accept',
+            86400);
 
-	}
+        $this->cache = $cache;
+        $this->userId = $UserId;
+        $this->credentialService = $credentialService;
+        $this->am = $am;
+        $this->urlGenerator = $urlGenerator;
+
+    }
 
 	/**
 	 * @NoAdminRequired
@@ -68,7 +78,7 @@ class IconController extends ApiController {
 	 * @NoCSRFRequired
 	 */
 	public function getIcon($base64Url) {
-        $data = $this->getLocalIcon($base64Url);
+        $data = $this->getCachedIcon($base64Url);
 
 		$offset = 3600 * 24 * 30;
 		$contentType = 'image/png';
@@ -112,11 +122,13 @@ class IconController extends ApiController {
 		return new JSONResponse($icons);
 	}
 
-    private function getLocalIcon($base64Url)
+    private function getCachedIcon($base64Url)
     {
-        $path = $this->getPathIcon($base64Url);
-        if (is_file($path)) {
-            return file_get_contents($path);
+        $cacheName = 'passman.' . md5($base64Url);
+        $imageCached = $this->cache->get($cacheName);
+
+        if ($imageCached) {
+            return base64_decode($imageCached);
         }
 
         try {
@@ -125,14 +137,15 @@ class IconController extends ApiController {
             $icon = null;
         }
 
-
         if ($icon && $icon->icoExists) {
-            file_put_contents($path, $icon->icoData);
+            $data = $icon->icoData;
+            $this->cache->set($cacheName, base64_encode($icon->icoData), 3600 * 24 * 365);
         } else {
-            $data = base64_decode("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAABHVBMVEUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADF3oJhAAAAXnRSTlMAAQIDBAUGBwgJCwwOEBITFBUWFxgaHB4hJCUnKissMDI0ODs9PkFCQ0RNUVJWV1lbXF1hY2Zna2xtcXh7f4KDhYmUm52lq62vsLW3ucHFyszO0dPV197i7/H3+fv9358zuQAAAWdJREFUWMPtldlWwjAURdPWogyKOKM4z0NRQRRHnAdE0QoI1eb/P8OnmzYlSZs+unIes+/ZbdOuFCFuBmc2Dk+qpe18EsVIptTGJJ3jrGR99B4H8jQlUTfOMSM3ZtT+SAsz8z0ZrZ//wZy4S1H6C1iQtfD+tCsS4EJYP9kV9rGTCRE0fMOfxZypITO7++5b/NCE/S3fx7PsLc9/eeuWqK/3vA9ngAJ3BPwmBIIdMnYbvNNLgo4Egg4MvelBpD0D6/F3YYJcJd0PEw7AWa6gCCNnLLoPtMoVPMJIikVNoE2uAN6BzcZ1MPA2wRA+AUIHwHkn1BAM7LH5OvBhjiAFA6tsXgCe4wjSMLDC5nPAx5Xg3wrGylfk1GlcM/MC/KFW6fvRVbBkLuj+omwf401KUJcXtCiBIy+gT4UYfawrgRIogRIogRLwBG4MAfVnsuX7XX8fWfKCU0qgvcr2mwaiDZYtsw/tMtnCP4F4Y01BhTeiAAAAAElFTkSuQmCC");
-            file_put_contents($path, $data);
+            $dataEncoded = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAABHVBMVEUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADF3oJhAAAAXnRSTlMAAQIDBAUGBwgJCwwOEBITFBUWFxgaHB4hJCUnKissMDI0ODs9PkFCQ0RNUVJWV1lbXF1hY2Zna2xtcXh7f4KDhYmUm52lq62vsLW3ucHFyszO0dPV197i7/H3+fv9358zuQAAAWdJREFUWMPtldlWwjAURdPWogyKOKM4z0NRQRRHnAdE0QoI1eb/P8OnmzYlSZs+unIes+/ZbdOuFCFuBmc2Dk+qpe18EsVIptTGJJ3jrGR99B4H8jQlUTfOMSM3ZtT+SAsz8z0ZrZ//wZy4S1H6C1iQtfD+tCsS4EJYP9kV9rGTCRE0fMOfxZypITO7++5b/NCE/S3fx7PsLc9/eeuWqK/3vA9ngAJ3BPwmBIIdMnYbvNNLgo4Egg4MvelBpD0D6/F3YYJcJd0PEw7AWa6gCCNnLLoPtMoVPMJIikVNoE2uAN6BzcZ1MPA2wRA+AUIHwHkn1BAM7LH5OvBhjiAFA6tsXgCe4wjSMLDC5nPAx5Xg3wrGylfk1GlcM/MC/KFW6fvRVbBkLuj+omwf401KUJcXtCiBIy+gT4UYfawrgRIogRIogRLwBG4MAfVnsuX7XX8fWfKCU0qgvcr2mwaiDZYtsw/tMtnCP4F4Y01BhTeiAAAAAElFTkSuQmCC";
+            $this->cache->set($cacheName, $dataEncoded, 3600 * 24);
+            $data = base64_decode($dataEncoded);
         }
-        return file_get_contents($path);
+        return $data;
     }
 
     /**
@@ -147,33 +160,5 @@ class IconController extends ApiController {
         }
 
         return new IconService($url);
-    }
-
-    /**
-     * @param $base64Url
-     * @return string
-     * @throws \OCP\App\AppPathNotFoundException
-     */
-    private function getPathIcon($base64Url)
-    {
-        $md5 = md5($base64Url);
-        return $this->getBasePath($md5) . '/' . $md5;
-    }
-
-    /**
-     * @param $md5
-     * @return string
-     * @throws \OCP\App\AppPathNotFoundException
-     */
-    private function getBasePath($md5)
-    {
-        $dirApp= $this->am->getAppPath('passman');
-        $start = mb_substr($md5, 0, 2);
-        $path = "$dirApp/img/icons/collection/$start";
-
-        if (!is_dir($path) && !mkdir($path, 0777, true) && !is_dir($path)) {
-            throw new \RuntimeException(sprintf('Directory "%s" was not created', $path));
-        }
-        return $path;
     }
 }
