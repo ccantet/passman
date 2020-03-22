@@ -12,7 +12,6 @@
 namespace OCA\Passman\Controller;
 
 use OC\App\AppManager;
-use OCA\Passman\Service\CredentialService;
 use OCA\Passman\Service\IconService;
 use OCA\Passman\Utility\Utils;
 use OCP\AppFramework\ApiController;
@@ -24,8 +23,6 @@ use OCP\IURLGenerator;
 
 class IconController extends ApiController
 {
-    private $userId;
-    private $credentialService;
     private $am;
     private $urlGenerator;
     /**
@@ -35,9 +32,7 @@ class IconController extends ApiController
 
     public function __construct($AppName,
                                 IRequest $request,
-                                $UserId,
                                 ICache $cache,
-                                CredentialService $credentialService,
                                 AppManager $am,
                                 IURLGenerator $urlGenerator
     )
@@ -50,8 +45,6 @@ class IconController extends ApiController
             86400);
 
         $this->cache = $cache;
-        $this->userId = $UserId;
-        $this->credentialService = $credentialService;
         $this->am = $am;
         $this->urlGenerator = $urlGenerator;
 
@@ -73,25 +66,27 @@ class IconController extends ApiController
 		return new JSONResponse();
 	}
 
-	/**
-	 * @NoAdminRequired
-	 * @NoCSRFRequired
-	 */
-	public function getIcon($base64Url) {
-        $data = $this->getCachedIcon($base64Url);
+    /**
+     * @NoAdminRequired
+     * @NoCSRFRequired
+     */
+    public function getIcon($base64Url)
+    {
+        $data = $this->retrieveIcon($base64Url);
 
-		$offset = 3600 * 24 * 30;
-		$contentType = 'image/png';
-		$response = new DataDownloadResponse($data, 'icon', $contentType);
+        $offset = 3600 * 24 * 30;
+        $contentType = 'image/png';
+        $response = new DataDownloadResponse($data, 'icon', $contentType);
 
-		$response->addHeader('Content-Type', $contentType);
-		$response->addHeader('Content-Length:', mb_strlen($data));
-		$response->addHeader('Expires: ', gmdate("D, d M Y H:i:s", time() + $offset) . " GMT");
-		$response->setETag($base64Url);
-		$response->cacheFor($offset);
+        $response->addHeader('Content-Type', $contentType);
+        $response->addHeader('Content-Length:', mb_strlen($data));
+        $response->addHeader('Expires: ', gmdate("D, d M Y H:i:s", time() + $offset) . " GMT");
+        $response->setETag($base64Url);
+        $response->cacheFor($offset);
+        $response->addHeader('Cache-Control', 'max-age=' . $offset);
 
-		return $response;
-	}
+        return $response;
+    }
 
 	/**
 	 * @NoAdminRequired
@@ -122,43 +117,81 @@ class IconController extends ApiController
 		return new JSONResponse($icons);
 	}
 
-    private function getCachedIcon($base64Url)
+    private function retrieveIcon($base64Url)
     {
-        $cacheName = 'passman.' . md5($base64Url);
-        $imageCached = $this->cache->get($cacheName);
+        $dataEncoded = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAABHVBMVEUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADF3oJhAAAAXnRSTlMAAQIDBAUGBwgJCwwOEBITFBUWFxgaHB4hJCUnKissMDI0ODs9PkFCQ0RNUVJWV1lbXF1hY2Zna2xtcXh7f4KDhYmUm52lq62vsLW3ucHFyszO0dPV197i7/H3+fv9358zuQAAAWdJREFUWMPtldlWwjAURdPWogyKOKM4z0NRQRRHnAdE0QoI1eb/P8OnmzYlSZs+unIes+/ZbdOuFCFuBmc2Dk+qpe18EsVIptTGJJ3jrGR99B4H8jQlUTfOMSM3ZtT+SAsz8z0ZrZ//wZy4S1H6C1iQtfD+tCsS4EJYP9kV9rGTCRE0fMOfxZypITO7++5b/NCE/S3fx7PsLc9/eeuWqK/3vA9ngAJ3BPwmBIIdMnYbvNNLgo4Egg4MvelBpD0D6/F3YYJcJd0PEw7AWa6gCCNnLLoPtMoVPMJIikVNoE2uAN6BzcZ1MPA2wRA+AUIHwHkn1BAM7LH5OvBhjiAFA6tsXgCe4wjSMLDC5nPAx5Xg3wrGylfk1GlcM/MC/KFW6fvRVbBkLuj+omwf401KUJcXtCiBIy+gT4UYfawrgRIogRIogRLwBG4MAfVnsuX7XX8fWfKCU0qgvcr2mwaiDZYtsw/tMtnCP4F4Y01BhTeiAAAAAElFTkSuQmCC';
+        $host = $this->getHostFromBase64($base64Url);
+        if (false === $host) {
+            return base64_decode($dataEncoded);
+        }
 
+        $imageCached = $this->getCachedIcon($host);
         if ($imageCached) {
             return base64_decode($imageCached);
         }
 
         try {
-            $icon = $this->getRemoteIcon($base64Url);
+            $icon = $this->getRemoteIcon($host);
+
+            if ($icon->icoExists) {
+                $this->cacheIcon($host, $icon->icoData);
+                return $this->getCachedIcon($host);
+            }
         } catch (\Exception $e) {
             $icon = null;
         }
 
-        if ($icon && $icon->icoExists) {
-            $data = $icon->icoData;
-            $this->cache->set($cacheName, base64_encode($icon->icoData), 3600 * 24 * 365);
-        } else {
-            $dataEncoded = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAABHVBMVEUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADF3oJhAAAAXnRSTlMAAQIDBAUGBwgJCwwOEBITFBUWFxgaHB4hJCUnKissMDI0ODs9PkFCQ0RNUVJWV1lbXF1hY2Zna2xtcXh7f4KDhYmUm52lq62vsLW3ucHFyszO0dPV197i7/H3+fv9358zuQAAAWdJREFUWMPtldlWwjAURdPWogyKOKM4z0NRQRRHnAdE0QoI1eb/P8OnmzYlSZs+unIes+/ZbdOuFCFuBmc2Dk+qpe18EsVIptTGJJ3jrGR99B4H8jQlUTfOMSM3ZtT+SAsz8z0ZrZ//wZy4S1H6C1iQtfD+tCsS4EJYP9kV9rGTCRE0fMOfxZypITO7++5b/NCE/S3fx7PsLc9/eeuWqK/3vA9ngAJ3BPwmBIIdMnYbvNNLgo4Egg4MvelBpD0D6/F3YYJcJd0PEw7AWa6gCCNnLLoPtMoVPMJIikVNoE2uAN6BzcZ1MPA2wRA+AUIHwHkn1BAM7LH5OvBhjiAFA6tsXgCe4wjSMLDC5nPAx5Xg3wrGylfk1GlcM/MC/KFW6fvRVbBkLuj+omwf401KUJcXtCiBIy+gT4UYfawrgRIogRIogRLwBG4MAfVnsuX7XX8fWfKCU0qgvcr2mwaiDZYtsw/tMtnCP4F4Y01BhTeiAAAAAElFTkSuQmCC";
-            $this->cache->set($cacheName, $dataEncoded, 3600 * 24);
-            $data = base64_decode($dataEncoded);
+        return base64_decode($dataEncoded);
+    }
+
+    /**
+     * @param $host
+     * @return IconService
+     */
+    private function getRemoteIcon($host)
+    {
+        if (!preg_match("~^(?:f|ht)tps?://~i", $host)) {
+            $host = "http://" . $host;
+        }
+        return new IconService($host);
+    }
+
+    private function getCachedIcon($host)
+    {
+        $data = $this->cache->get($this->getKeyCache($host));
+        if ($data) {
+            return base64_decode($data);
         }
         return $data;
     }
 
-    /**
-     * @param $base64Url
-     * @return IconService
-     */
-    private function getRemoteIcon($base64Url)
+    private function cacheIcon($host, $data)
+    {
+        return $this->cache->set($this->getKeyCache($host), base64_encode($data), 3600 * 24 * 365);
+    }
+
+    private function getKeyCache($host)
+    {
+        return 'passman.' . md5($host);
+    }
+
+    private function getUrlFromBase64($base64Url)
     {
         $url = base64_decode(str_replace('_', '/', $base64Url));
         if (!preg_match("~^(?:f|ht)tps?://~i", $url)) {
             $url = "http://" . $url;
         }
+        return $url;
+    }
 
-        return new IconService($url);
+    private function getHostFromBase64($base64Url)
+    {
+        $host = parse_url($this->getUrlFromBase64($base64Url));
+        if (false === $host || empty($host['host'])) {
+            return false;
+        }
+        $scheme = $host['scheme'] ?? 'http';
+
+        return $scheme . '://' . $host['host'];
     }
 }
