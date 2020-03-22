@@ -11,19 +11,14 @@
 
 namespace OCA\Passman\Controller;
 
-use Doctrine\DBAL\Exception\DriverException;
 use OC\App\AppManager;
+use OCA\Passman\Service\CredentialService;
 use OCA\Passman\Service\IconService;
 use OCA\Passman\Utility\Utils;
-use OCP\AppFramework\Db\DoesNotExistException;
-use OCP\AppFramework\Http\DataDownloadResponse;
-use OCP\AppFramework\Http\Response;
-use OCP\IConfig;
-use OCP\IRequest;
-use OCP\AppFramework\Http\JSONResponse;
 use OCP\AppFramework\ApiController;
-use OCA\Passman\Service\CredentialService;
-use \OCP\App;
+use OCP\AppFramework\Http\DataDownloadResponse;
+use OCP\AppFramework\Http\JSONResponse;
+use OCP\IRequest;
 use OCP\IURLGenerator;
 
 class IconController extends ApiController {
@@ -57,13 +52,7 @@ class IconController extends ApiController {
 	 * @NoCSRFRequired
 	 */
 	public function getSingleIcon($base64Url) {
-		$url = base64_decode(str_replace('_','/', $base64Url));
-		if (!preg_match("~^(?:f|ht)tps?://~i", $url)) {
-			$url = "http://" . $url;
-		}
-
-
-		$icon = new IconService($url);
+        $icon = $this->getRemoteIcon($base64Url);
 
 		if ($icon->icoExists) {
 			$icon_json['type']= $icon->icoType;
@@ -78,51 +67,8 @@ class IconController extends ApiController {
 	 * @NoAdminRequired
 	 * @NoCSRFRequired
 	 */
-	public function getIcon($base64Url, $credentialId) {
-		$url = base64_decode(str_replace('_','/', $base64Url));
-
-		if($credentialId) {
-			try {
-				$credential = $this->credentialService->getCredentialById($credentialId, $this->userId);
-				$credential = $credential->jsonSerialize();
-			} catch (DoesNotExistException $e){
-				// Credential is not found, continue
-				$credential = false;
-			}
-		}
-
-		if (!preg_match("~^(?:f|ht)tps?://~i", $url)) {
-			$url = "http://" . $url;
-		}
-
-		$icon = new IconService($url);
-
-		$data = base64_decode("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAABHVBMVEUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADF3oJhAAAAXnRSTlMAAQIDBAUGBwgJCwwOEBITFBUWFxgaHB4hJCUnKissMDI0ODs9PkFCQ0RNUVJWV1lbXF1hY2Zna2xtcXh7f4KDhYmUm52lq62vsLW3ucHFyszO0dPV197i7/H3+fv9358zuQAAAWdJREFUWMPtldlWwjAURdPWogyKOKM4z0NRQRRHnAdE0QoI1eb/P8OnmzYlSZs+unIes+/ZbdOuFCFuBmc2Dk+qpe18EsVIptTGJJ3jrGR99B4H8jQlUTfOMSM3ZtT+SAsz8z0ZrZ//wZy4S1H6C1iQtfD+tCsS4EJYP9kV9rGTCRE0fMOfxZypITO7++5b/NCE/S3fx7PsLc9/eeuWqK/3vA9ngAJ3BPwmBIIdMnYbvNNLgo4Egg4MvelBpD0D6/F3YYJcJd0PEw7AWa6gCCNnLLoPtMoVPMJIikVNoE2uAN6BzcZ1MPA2wRA+AUIHwHkn1BAM7LH5OvBhjiAFA6tsXgCe4wjSMLDC5nPAx5Xg3wrGylfk1GlcM/MC/KFW6fvRVbBkLuj+omwf401KUJcXtCiBIy+gT4UYfawrgRIogRIogRLwBG4MAfVnsuX7XX8fWfKCU0qgvcr2mwaiDZYtsw/tMtnCP4F4Y01BhTeiAAAAAElFTkSuQmCC");
-		$type = 'png';
-		
-		if ($icon->icoExists) {
-			$data = $icon->icoData;
-			$type = $icon->icoType;
-		}
-		if (isset($credential) && $credential['user_id'] == $this->userId) {
-			$iconData = [
-				'type' => ($type) ? $type : 'x-icon',
-				'content' => base64_encode($data)
-			];
-			$credential['icon'] = json_encode($iconData);
-			try {
-				if($credential) {
-					$this->credentialService->updateCredential($credential);
-				}
-			} catch (DriverException $exception) {
-				/**
-				 * @FIXME Syntax error or access violation: 1118 Row size too large
-				 * This happens when favicons are quite big.
-				 * Githubs one is 33kb and triggers the try catch
-				 */
-			}
-		}
-
+	public function getIcon($base64Url) {
+        $data = $this->getLocalIcon($base64Url);
 
 		$offset = 3600 * 24 * 30;
 		$contentType = 'image/png';
@@ -165,4 +111,69 @@ class IconController extends ApiController {
 		}
 		return new JSONResponse($icons);
 	}
+
+    private function getLocalIcon($base64Url)
+    {
+        $path = $this->getPathIcon($base64Url);
+        if (is_file($path)) {
+            return file_get_contents($path);
+        }
+
+        try {
+            $icon = $this->getRemoteIcon($base64Url);
+        } catch (\Exception $e) {
+            $icon = null;
+        }
+
+
+        if ($icon && $icon->icoExists) {
+            file_put_contents($path, $icon->icoData);
+        } else {
+            $data = base64_decode("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAABHVBMVEUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADF3oJhAAAAXnRSTlMAAQIDBAUGBwgJCwwOEBITFBUWFxgaHB4hJCUnKissMDI0ODs9PkFCQ0RNUVJWV1lbXF1hY2Zna2xtcXh7f4KDhYmUm52lq62vsLW3ucHFyszO0dPV197i7/H3+fv9358zuQAAAWdJREFUWMPtldlWwjAURdPWogyKOKM4z0NRQRRHnAdE0QoI1eb/P8OnmzYlSZs+unIes+/ZbdOuFCFuBmc2Dk+qpe18EsVIptTGJJ3jrGR99B4H8jQlUTfOMSM3ZtT+SAsz8z0ZrZ//wZy4S1H6C1iQtfD+tCsS4EJYP9kV9rGTCRE0fMOfxZypITO7++5b/NCE/S3fx7PsLc9/eeuWqK/3vA9ngAJ3BPwmBIIdMnYbvNNLgo4Egg4MvelBpD0D6/F3YYJcJd0PEw7AWa6gCCNnLLoPtMoVPMJIikVNoE2uAN6BzcZ1MPA2wRA+AUIHwHkn1BAM7LH5OvBhjiAFA6tsXgCe4wjSMLDC5nPAx5Xg3wrGylfk1GlcM/MC/KFW6fvRVbBkLuj+omwf401KUJcXtCiBIy+gT4UYfawrgRIogRIogRLwBG4MAfVnsuX7XX8fWfKCU0qgvcr2mwaiDZYtsw/tMtnCP4F4Y01BhTeiAAAAAElFTkSuQmCC");
+            file_put_contents($path, $data);
+        }
+        return file_get_contents($path);
+    }
+
+    /**
+     * @param $base64Url
+     * @return IconService
+     */
+    private function getRemoteIcon($base64Url)
+    {
+        $url = base64_decode(str_replace('_', '/', $base64Url));
+        if (!preg_match("~^(?:f|ht)tps?://~i", $url)) {
+            $url = "http://" . $url;
+        }
+
+        return new IconService($url);
+    }
+
+    /**
+     * @param $base64Url
+     * @return string
+     * @throws \OCP\App\AppPathNotFoundException
+     */
+    private function getPathIcon($base64Url)
+    {
+        $md5 = md5($base64Url);
+        return $this->getBasePath($md5) . '/' . $md5;
+    }
+
+    /**
+     * @param $md5
+     * @return string
+     * @throws \OCP\App\AppPathNotFoundException
+     */
+    private function getBasePath($md5)
+    {
+        $dirApp= $this->am->getAppPath('passman');
+        $start = mb_substr($md5, 0, 2);
+        $path = "$dirApp/img/icons/collection/$start";
+
+        if (!is_dir($path) && !mkdir($path, 0777, true) && !is_dir($path)) {
+            throw new \RuntimeException(sprintf('Directory "%s" was not created', $path));
+        }
+        return $path;
+    }
 }

@@ -104,7 +104,9 @@ class VaultController extends ApiController {
 		$result = array();
 		if (isset($vault)) {
 			$credentials = $this->credentialService->getCredentialsByVaultId($vault->getId(), $this->userId);
-
+            foreach ($credentials as $credential) {
+                $credential->setIcon(null);
+            }
 			$result = array(
 				'vault_id' => $vault->getId(),
 				'guid' => $vault->getGuid(),
