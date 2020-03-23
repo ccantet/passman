@@ -50,21 +50,22 @@ class IconController extends ApiController
 
     }
 
-	/**
-	 * @NoAdminRequired
-	 * @NoCSRFRequired
-	 */
-	public function getSingleIcon($base64Url) {
+    /**
+     * @NoAdminRequired
+     * @NoCSRFRequired
+     */
+    public function getSingleIcon($base64Url)
+    {
         $icon = $this->getRemoteIcon($base64Url);
 
-		if ($icon->icoExists) {
-			$icon_json['type']= $icon->icoType;
-			$icon_json['content']= base64_encode($icon->icoData);
-			return new JSONResponse($icon_json);
-		}
+        if ($icon->icoExists) {
+            $icon_json['type'] = $icon->icoType;
+            $icon_json['content'] = base64_encode($icon->icoData);
+            return new JSONResponse($icon_json);
+        }
 
-		return new JSONResponse();
-	}
+        return new JSONResponse();
+    }
 
     /**
      * @NoAdminRequired
@@ -88,34 +89,35 @@ class IconController extends ApiController
         return $response;
     }
 
-	/**
-	 * @NoAdminRequired
-	 * @NoCSRFRequired
-	 */
-	public function getLocalIconList() {
-		$dir = $this->am->getAppPath('passman');
-		$result = Utils::getDirContents($dir . '/img/icons');
+    /**
+     * @NoAdminRequired
+     * @NoCSRFRequired
+     */
+    public function getLocalIconList()
+    {
+        $dir = $this->am->getAppPath('passman');
+        $result = Utils::getDirContents($dir . '/img/icons');
 
-		$icons = [];
-		foreach ($result as $icon) {
-			$iconPath = $icon;
-			$path = explode('passman/', $iconPath);
-			$pack = explode('/', $path[1])[2];
-			$mime = mime_content_type($iconPath);
-			//print_r($path);
-			if($mime !== 'directory') {
-				$icon = [];
-				$icon['mimetype'] = mime_content_type($iconPath);
-				$icon['url'] = $this->urlGenerator->linkTo('passman', $path[1]);
-				$icon['pack'] = $pack;
-				if(!isset($icons[$pack])){
-					$icons[$pack] = [];
-				}
-				$icons[$pack][] = $icon;
-			}
-		}
-		return new JSONResponse($icons);
-	}
+        $icons = [];
+        foreach ($result as $icon) {
+            $iconPath = $icon;
+            $path = explode('passman/', $iconPath);
+            $pack = explode('/', $path[1])[2];
+            $mime = mime_content_type($iconPath);
+            //print_r($path);
+            if ($mime !== 'directory') {
+                $icon = [];
+                $icon['mimetype'] = mime_content_type($iconPath);
+                $icon['url'] = $this->urlGenerator->linkTo('passman', $path[1]);
+                $icon['pack'] = $pack;
+                if (!isset($icons[$pack])) {
+                    $icons[$pack] = [];
+                }
+                $icons[$pack][] = $icon;
+            }
+        }
+        return new JSONResponse($icons);
+    }
 
     private function retrieveIcon($base64Url)
     {
@@ -127,21 +129,23 @@ class IconController extends ApiController
 
         $imageCached = $this->getCachedIcon($host);
         if ($imageCached) {
-            return base64_decode($imageCached);
+            return $imageCached;
         }
 
         try {
             $icon = $this->getRemoteIcon($host);
 
-            if ($icon->icoExists) {
+            if ($icon->icoExists && $icon->icoType !== 'css' && $icon->icoType !== 'json') {
                 $this->cacheIcon($host, $icon->icoData);
-                return $this->getCachedIcon($host);
+                return $icon->icoData;
             }
         } catch (\Exception $e) {
             $icon = null;
         }
 
-        return base64_decode($dataEncoded);
+        $dataDecoded = base64_decode($dataEncoded);
+        $this->cacheIcon($host, $dataDecoded, 3600 * 24);
+        return $dataDecoded;
     }
 
     /**
@@ -165,9 +169,9 @@ class IconController extends ApiController
         return $data;
     }
 
-    private function cacheIcon($host, $data)
+    private function cacheIcon($host, $data, $ttl = 3600 * 24 * 365)
     {
-        return $this->cache->set($this->getKeyCache($host), base64_encode($data), 3600 * 24 * 365);
+        return $this->cache->set($this->getKeyCache($host), base64_encode($data), $ttl);
     }
 
     private function getKeyCache($host)
