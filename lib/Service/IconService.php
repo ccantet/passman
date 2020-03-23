@@ -181,64 +181,89 @@ class IconService {
 	}
 
 
-	private function parseLinkElement($htmlHead, $pageUrlInfo, $base_href){
-		if (preg_match('#<\s*link[^>]*(rel=(["\'])[^>\2]*icon[^>\2]*\2)[^>]*>#i', $htmlHead, $matches)) {
-			$link_tag = $matches[0];
-			$this->debugInfo['link_tag'] = $link_tag;
+	private function getValueRel($rel) {
+		$strtolower = mb_strtolower($rel);
+		if ($strtolower === 'icon') {
+			return 0;
+		}
+		if (strpos($strtolower, 'shortcut') !== false) {
+			return 1;
+		}
+		if ($strtolower === 'mask-icon') {
+			return 2;
+		}
+		return 3;
+	}
 
-			// HTML <link> icon tag href analysis
-			if (preg_match('#href\s*=\s*(["\'])(.*?)\1#i', $link_tag, $matches)) {
-				$ico_href = trim($matches[2]);
-				$this->debugInfo['ico_href'] = $ico_href;
-				$this->findMethod = 'head';
+	private function parseLinkElement($htmlHead, $pageUrlInfo, $base_href) {
 
-				// Building full absolute URL
-				$urlType = self::urlType($ico_href);
-				switch ($urlType) {
-					case self::URL_TYPE_ABSOLUTE:
-						$this->findMethod .= ' absolute';
-						$this->icoUrl = $ico_href;
-						$this->icoType = self::getExtension($this->icoUrl);
-						break;
-					case self::URL_TYPE_ABSOLUTE_SCHEME:
-						$this->findMethod .= ' absolute_scheme';
-						$this->icoUrl = $pageUrlInfo['scheme'] . ':' . $ico_href;
-						$this->icoType = self::getExtension($this->icoUrl);
-						break;
-					case self::URL_TYPE_ABSOLUTE_PATH:
-						$this->findMethod .= ' absolute_path';
-						$this->icoUrl = rtrim($this->siteUrl, '/') . '/' . ltrim($ico_href, '/');
-						$this->findMethod .= ' without base href';
-						if (isset($base_href)) {
-							$baseHrefType = self::urlType($base_href);
-							if ($baseHrefType != self::URL_TYPE_ABSOLUTE) {
-								throw new \Exception("Base href is not an absolute URL");
-							}
-							$baseUrlInfo = parse_url($base_href);
-							$this->icoUrl = $baseUrlInfo['scheme'] . '://' . $baseUrlInfo['host'] . $ico_href;
-							$this->findMethod .= ' with base href';
+		if (!preg_match_all('/<\s*link[^>]*(rel=(["\'])([^>"\']*icon)[^>"\']*\2)[^>]*>/i', $htmlHead, $matches, PREG_SET_ORDER)) {
+			return;
+		}
+
+		usort($matches, function ($match1, $match2) {
+			$rel1 = $match1[3];
+			$rel2 = $match2[3];
+
+			return $this->getValueRel($rel1) - $this->getValueRel($rel2);
+		});
+
+		$link_tag = $matches[0][0];
+		$this->debugInfo['link_tag'] = $link_tag;
+
+		// HTML <link> icon tag href analysis
+		if (preg_match('#href\s*=\s*(["\'])(.*?)\1#i', $link_tag, $matches)) {
+			$ico_href = trim($matches[2]);
+			$this->debugInfo['ico_href'] = $ico_href;
+			$this->findMethod = 'head';
+
+			// Building full absolute URL
+			$urlType = self::urlType($ico_href);
+			switch ($urlType) {
+				case self::URL_TYPE_ABSOLUTE:
+					$this->findMethod .= ' absolute';
+					$this->icoUrl = $ico_href;
+					$this->icoType = self::getExtension($this->icoUrl);
+					break;
+				case self::URL_TYPE_ABSOLUTE_SCHEME:
+					$this->findMethod .= ' absolute_scheme';
+					$this->icoUrl = $pageUrlInfo['scheme'] . ':' . $ico_href;
+					$this->icoType = self::getExtension($this->icoUrl);
+					break;
+				case self::URL_TYPE_ABSOLUTE_PATH:
+					$this->findMethod .= ' absolute_path';
+					$this->icoUrl = rtrim($this->siteUrl, '/') . '/' . ltrim($ico_href, '/');
+					$this->findMethod .= ' without base href';
+					if (isset($base_href)) {
+						$baseHrefType = self::urlType($base_href);
+						if ($baseHrefType != self::URL_TYPE_ABSOLUTE) {
+							throw new \Exception("Base href is not an absolute URL");
 						}
-						$this->icoType = self::getExtension($this->icoUrl);
-						break;
-					case self::URL_TYPE_RELATIVE:
-						$this->findMethod .= ' relative';
-						$path = preg_replace('#/[^/]+?$#i', '/', $pageUrlInfo['path']);
-						$this->icoUrl = $pageUrlInfo['scheme'] . '://' . $pageUrlInfo['host'] . $path . $ico_href;
-						$this->findMethod .= ' without base href';
-						if (isset($base_href)) {
-							$this->icoUrl = $base_href . $ico_href;
-							$this->findMethod .= ' with base href';
-						}
-						$this->icoType = self::getExtension($this->icoUrl);
-						break;
-					case self::URL_TYPE_EMBED_BASE64:
-						$this->findMethod .= ' base64';
-						$this->icoUrl = $ico_href;
-						break;
-				}
+						$baseUrlInfo = parse_url($base_href);
+						$this->icoUrl = $baseUrlInfo['scheme'] . '://' . $baseUrlInfo['host'] . $ico_href;
+						$this->findMethod .= ' with base href';
+					}
+					$this->icoType = self::getExtension($this->icoUrl);
+					break;
+				case self::URL_TYPE_RELATIVE:
+					$this->findMethod .= ' relative';
+					$path = preg_replace('#/[^/]+?$#i', '/', $pageUrlInfo['path']);
+					$this->icoUrl = $pageUrlInfo['scheme'] . '://' . $pageUrlInfo['host'] . $path . $ico_href;
+					$this->findMethod .= ' without base href';
+					if (isset($base_href)) {
+						$this->icoUrl = $base_href . $ico_href;
+						$this->findMethod .= ' with base href';
+					}
+					$this->icoType = self::getExtension($this->icoUrl);
+					break;
+				case self::URL_TYPE_EMBED_BASE64:
+					$this->findMethod .= ' base64';
+					$this->icoUrl = $ico_href;
+					break;
 			}
 		}
 	}
+
 
 	/**
 	 * Download the favicon if available
@@ -329,7 +354,7 @@ class IconService {
 		curl_setopt($ch, CURLOPT_MAXREDIRS, 20); 
 		curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:38.0) Gecko/20100101 Firefox/38.0');
 		curl_setopt($ch, CURLOPT_TIMEOUT, 3);
-        curl_setopt($ch, CURLOPT_ACCEPT_ENCODING, "");
+		curl_setopt($ch, CURLOPT_ACCEPT_ENCODING, "");
 
         // Don't check SSL certificate to allow autosigned certificate
 		if ($this->sslVerify === false) {

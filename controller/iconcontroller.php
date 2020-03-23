@@ -56,7 +56,7 @@ class IconController extends ApiController
      */
     public function getSingleIcon($base64Url)
     {
-        $icon = $this->getRemoteIcon($base64Url);
+        $icon = $this->getRemoteIcon($this->getHostFromBase64($base64Url));
 
         if ($icon->icoExists) {
             $icon_json['type'] = $icon->icoType;
